@@ -1,0 +1,4 @@
+secrets = {
+    'BOT_API_TOKEN': '7061056728:AAEc45Eo5urAP56HXKUbixl7I50bj8jZJP0',
+    'WEBAPP_URL': ''
+}
