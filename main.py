@@ -6,7 +6,7 @@ import requests # Добавляем библиотеку для запросо�
 import telebot
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 from secrets import secrets
-from stories import STORIES
+from loveHistoryBot.stories.stories import STORIES
 
 bot = telebot.TeleBot(secrets['BOT_API_TOKEN'])
 
