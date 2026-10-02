@@ -180,25 +180,35 @@ def cb_open(call):
     except Exception:
         pass
 
-    # Обложка + инфо о героях
     cover_path = find_image(story, "cover") or story.get("cover")
     text = (
         f"<b>{story['title']}</b>\n"
         f"<i>{story['setting']}</i>\n\n"
         f"Героиня: <b>{story['heroine']}</b>\n\n"
-        f"В этой истории три мужчины:\n"
-        + "\n".join(f"• <b>{h['name']}</b> — {h['desc']}" for h in story["heroes"])
-        + "\n\n💫 Как ты хочешь пройти эту историю?"
+        f"👥 <b>Познакомься с героями:</b>\n"
+        f"Нажми на имя, чтобы увидеть портрет и узнать подробнее.\n\n"
+        f"💫 Как ты хочешь пройти эту историю?"
+    )
+
+    # Клавиатура: кнопки героев + героиня + POV
+    kb = InlineKeyboardMarkup(row_width=1)
+    for h in story["heroes"]:
+        kb.add(InlineKeyboardButton(f"👤 {h['name']}", callback_data=f"hero:{key}:{h['id']}"))
+    kb.add(InlineKeyboardButton(f"👩 {story['heroine']}", callback_data=f"heroine:{key}"))
+    kb.add(InlineKeyboardButton("─" * 20, callback_data="noop"))
+    kb.add(
+        InlineKeyboardButton("💃 От первого лица", callback_data=f"pov:first:{key}"),
+        InlineKeyboardButton("🎭 От третьего лица", callback_data=f"pov:third:{key}"),
+        InlineKeyboardButton("← Назад", callback_data="menu")
     )
 
     if cover_path and os.path.exists(cover_path):
         with open(cover_path, "rb") as f:
             bot.send_photo(call.message.chat.id, f, caption=text,
-                           parse_mode="HTML", reply_markup=pov_keyboard(key))
+                           parse_mode="HTML", reply_markup=kb)
     else:
         bot.send_message(call.message.chat.id, text,
-                         parse_mode="HTML", reply_markup=pov_keyboard(key))
-
+                         parse_mode="HTML", reply_markup=kb)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("pov:"))
 def cb_pov(call):
@@ -283,6 +293,76 @@ def fallback(message):
         reply_markup=main_keyboard(message.chat.id)
     )
 
+# Игнорируем разделитель
+@bot.callback_query_handler(func=lambda c: c.data == "noop")
+def cb_noop(call):
+    bot.answer_callback_query(call.id)
+
+
+# Карточка мужского персонажа
+@bot.callback_query_handler(func=lambda c: c.data.startswith("hero:"))
+def cb_hero(call):
+    _, key, hero_id = call.data.split(":", 2)
+    story = STORIES[key]
+    hero = next((h for h in story["heroes"] if h["id"] == hero_id), None)
+    if not hero:
+        bot.answer_callback_query(call.id, "Персонаж не найден")
+        return
+
+    text = (
+        f"👤 <b>{hero['name']}</b>\n\n"
+        f"{hero.get('about', hero['desc'])}"
+    )
+
+    img_path = find_image(story, f"hero_{hero_id}")
+
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton("← Назад к истории", callback_data=f"open:{key}"))
+
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception:
+        pass
+
+    if img_path:
+        with open(img_path, "rb") as f:
+            bot.send_photo(call.message.chat.id, f, caption=text,
+                           parse_mode="HTML", reply_markup=kb)
+    else:
+        bot.send_message(call.message.chat.id, text,
+                         parse_mode="HTML", reply_markup=kb)
+
+
+# Карточка главной героини
+@bot.callback_query_handler(func=lambda c: c.data.startswith("heroine:"))
+def cb_heroine(call):
+    key = call.data.split(":", 1)[1]
+    story = STORIES[key]
+    h = story.get("heroine_full", {})
+    about = h.get("about", "Описание героини пока не добавлено.")
+
+    text = (
+        f"👩 <b>{story['heroine']}</b>\n\n"
+        f"{about}"
+    )
+
+    img_path = find_image(story, "heroine")
+
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton("← Назад к истории", callback_data=f"open:{key}"))
+
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception:
+        pass
+
+    if img_path:
+        with open(img_path, "rb") as f:
+            bot.send_photo(call.message.chat.id, f, caption=text,
+                           parse_mode="HTML", reply_markup=kb)
+    else:
+        bot.send_message(call.message.chat.id, text,
+                         parse_mode="HTML", reply_markup=kb)
 
 if __name__ == "__main__":
     print(f"💘 Бот запущен. Историй: {len(STORIES)}")
