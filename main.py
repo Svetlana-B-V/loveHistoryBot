@@ -10,6 +10,93 @@ bot = telebot.TeleBot(secrets['BOT_API_TOKEN'])
 STORIES_DIR = "stories"
 PROGRESS_FILE = "progress.json"
 
+USER_CARD = {}
+
+# ═══════════════ ТРЕКЕР ДЕТАЛЬНЫХ КАРТОЧЕК ПЕРСОНАЖЕЙ ═══════════════
+def _hide_main_keyboard(chat_id, main_id):
+    try:
+        bot.edit_message_reply_markup(chat_id=chat_id, message_id=main_id, reply_markup=None)
+    except Exception as e:
+        print(f"[hide_kb] {e}")
+
+
+def _show_main_keyboard(chat_id, main_id, story_key):
+    try:
+        bot.edit_message_reply_markup(chat_id=chat_id, message_id=main_id,
+                                      reply_markup=open_story_keyboard(story_key))
+    except Exception as e:
+        print(f"[show_kb] {e}")
+
+
+def _delete_prev_card(chat_id):
+    prev = USER_CARD.get(chat_id)
+    if prev and prev.get("card_id"):
+        try:
+            bot.delete_message(chat_id, prev["card_id"])
+        except Exception:
+            pass
+
+
+def _render_character_card(chat_id, story_key, character=None, is_heroine=False):
+    """
+    Отправляет карточку персонажа новым сообщением.
+    Удаляет предыдущую карточку. Возвращает message_id.
+    """
+    story = STORIES[story_key]
+    main_id = USER_CARD.get(chat_id, {}).get("main_id")
+
+    # Удаляем предыдущую карточку
+    _delete_prev_card(chat_id)
+
+    # Текст и картинка
+    if is_heroine:
+        h = story.get("heroine_full", {})
+        about = h.get("about", "Описание героини пока не добавлено.")
+        text = f"👩 <b>{story['heroine']}</b>\n\n{about}"
+        img_path = find_image(story, "heroine")
+    else:
+        text = f"👤 <b>{character['name']}</b>\n\n{character.get('about', character['desc'])}"
+        img_path = find_image(story, f"hero_{character['id']}")
+
+    # Клавиатура: все персонажи КРОМЕ текущего + возврат
+    kb = InlineKeyboardMarkup(row_width=2)
+    row_buttons = []
+
+    if not is_heroine:
+        row_buttons.append(InlineKeyboardButton(
+            f"👩 {story['heroine']}",
+            callback_data=f"card:heroine:{story_key}"
+        ))
+
+    for h in story["heroes"]:
+        if not is_heroine and h["id"] == character.get("id"):
+            continue
+        row_buttons.append(InlineKeyboardButton(
+            f"👤 {h['name']}",
+            callback_data=f"card:hero:{story_key}:{h['id']}"
+        ))
+
+    for b in row_buttons:
+        kb.add(b)
+    kb.add(InlineKeyboardButton("← Вернуться к истории", callback_data="close_card"))
+
+    # Отправляем
+    if img_path:
+        with open(img_path, "rb") as f:
+            sent = bot.send_photo(chat_id, f, caption=text,
+                                  parse_mode="HTML", reply_markup=kb)
+    else:
+        sent = bot.send_message(chat_id, text,
+                                parse_mode="HTML", reply_markup=kb)
+
+    # Обновляем состояние
+    USER_CARD[chat_id] = {
+        "card_id": sent.message_id,
+        "main_id": main_id,
+        "story_key": story_key,
+        "current": "heroine" if is_heroine else character["id"],
+    }
+    return sent.message_id
 
 # ═══════════════ ЗАГРУЗКА ВСЕХ ИСТОРИЙ ═══════════════
 def load_all_stories():
@@ -127,6 +214,17 @@ def node_keyboard(story_key, node):
     kb.add(InlineKeyboardButton("🏠 Главное меню", callback_data="menu"))
     return kb
 
+def open_story_keyboard(story_key):
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton("👥 О героях", callback_data=f"about:{story_key}"))
+    kb.add(InlineKeyboardButton("─" * 20, callback_data="noop"))
+    kb.add(
+        InlineKeyboardButton("💃 От первого лица", callback_data=f"pov:first:{story_key}"),
+        InlineKeyboardButton("🎭 От третьего лица", callback_data=f"pov:third:{story_key}"),
+        InlineKeyboardButton("← Назад", callback_data="menu")
+    )
+    return kb
+
 
 # ═══════════════ ХЕНДЛЕРЫ ═══════════════
 @bot.message_handler(commands=['start'])
@@ -185,22 +283,11 @@ def cb_open(call):
         f"<b>{story['title']}</b>\n"
         f"<i>{story['setting']}</i>\n\n"
         f"Героиня: <b>{story['heroine']}</b>\n\n"
-        f"👥 <b>Познакомься с героями:</b>\n"
-        f"Нажми на имя, чтобы увидеть портрет и узнать подробнее.\n\n"
+        f"👥 Нажми <b>«О героях»</b>, чтобы познакомиться с персонажами.\n\n"
         f"💫 Как ты хочешь пройти эту историю?"
     )
 
-    # Клавиатура: кнопки героев + героиня + POV
-    kb = InlineKeyboardMarkup(row_width=1)
-    for h in story["heroes"]:
-        kb.add(InlineKeyboardButton(f"👤 {h['name']}", callback_data=f"hero:{key}:{h['id']}"))
-    kb.add(InlineKeyboardButton(f"👩 {story['heroine']}", callback_data=f"heroine:{key}"))
-    kb.add(InlineKeyboardButton("─" * 20, callback_data="noop"))
-    kb.add(
-        InlineKeyboardButton("💃 От первого лица", callback_data=f"pov:first:{key}"),
-        InlineKeyboardButton("🎭 От третьего лица", callback_data=f"pov:third:{key}"),
-        InlineKeyboardButton("← Назад", callback_data="menu")
-    )
+    kb = open_story_keyboard(key)
 
     if cover_path and os.path.exists(cover_path):
         with open(cover_path, "rb") as f:
@@ -209,6 +296,7 @@ def cb_open(call):
     else:
         bot.send_message(call.message.chat.id, text,
                          parse_mode="HTML", reply_markup=kb)
+        
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("pov:"))
 def cb_pov(call):
@@ -299,71 +387,74 @@ def cb_noop(call):
     bot.answer_callback_query(call.id)
 
 
-# Карточка мужского персонажа
-@bot.callback_query_handler(func=lambda c: c.data.startswith("hero:"))
-def cb_hero(call):
-    _, key, hero_id = call.data.split(":", 2)
-    story = STORIES[key]
+# Открытие «О героях» — с главного экрана
+@bot.callback_query_handler(func=lambda c: c.data.startswith("about:"))
+def cb_about(call):
+    story_key = call.data.split(":", 1)[1]
+    chat_id = call.message.chat.id
+    main_id = call.message.message_id
+
+    # Сохраняем ID главного сообщения ДО скрытия кнопок
+    USER_CARD[chat_id] = {"main_id": main_id, "story_key": story_key}
+
+    # Скрываем кнопки на главном сообщении
+    _hide_main_keyboard(chat_id, main_id)
+
+    # Показываем по умолчанию карточку героини
+    _render_character_card(chat_id, story_key, is_heroine=True)
+    bot.answer_callback_query(call.id)
+
+
+# Переключение на карточку героя (с любой карточки)
+@bot.callback_query_handler(func=lambda c: c.data.startswith("card:hero:"))
+def cb_card_hero(call):
+    parts = call.data.split(":", 3)
+    # parts = ["card", "hero", story_key, hero_id]
+    if len(parts) != 4:
+        bot.answer_callback_query(call.id, "Ошибка")
+        return
+    _, _, story_key, hero_id = parts
+
+    story = STORIES[story_key]
     hero = next((h for h in story["heroes"] if h["id"] == hero_id), None)
     if not hero:
         bot.answer_callback_query(call.id, "Персонаж не найден")
         return
 
-    text = (
-        f"👤 <b>{hero['name']}</b>\n\n"
-        f"{hero.get('about', hero['desc'])}"
-    )
-
-    img_path = find_image(story, f"hero_{hero_id}")
-
-    kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton("← Назад к истории", callback_data=f"open:{key}"))
-
-    try:
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-    except Exception:
-        pass
-
-    if img_path:
-        with open(img_path, "rb") as f:
-            bot.send_photo(call.message.chat.id, f, caption=text,
-                           parse_mode="HTML", reply_markup=kb)
-    else:
-        bot.send_message(call.message.chat.id, text,
-                         parse_mode="HTML", reply_markup=kb)
+    _render_character_card(call.message.chat.id, story_key, hero, is_heroine=False)
+    bot.answer_callback_query(call.id)
 
 
-# Карточка главной героини
-@bot.callback_query_handler(func=lambda c: c.data.startswith("heroine:"))
-def cb_heroine(call):
-    key = call.data.split(":", 1)[1]
-    story = STORIES[key]
-    h = story.get("heroine_full", {})
-    about = h.get("about", "Описание героини пока не добавлено.")
+# Переключение на карточку героини (с карточки героя)
+@bot.callback_query_handler(func=lambda c: c.data.startswith("card:heroine:"))
+def cb_card_heroine(call):
+    parts = call.data.split(":", 2)
+    # parts = ["card", "heroine", story_key]
+    if len(parts) != 3:
+        bot.answer_callback_query(call.id, "Ошибка")
+        return
+    story_key = parts[2]
+    _render_character_card(call.message.chat.id, story_key, is_heroine=True)
+    bot.answer_callback_query(call.id)
 
-    text = (
-        f"👩 <b>{story['heroine']}</b>\n\n"
-        f"{about}"
-    )
 
-    img_path = find_image(story, "heroine")
+# Нажатие «← Вернуться к истории» — просто удаляем карточку
+@bot.callback_query_handler(func=lambda c: c.data == "close_card")
+def cb_close_card(call):
+    chat_id = call.message.chat.id
+    data = USER_CARD.pop(chat_id, None)
 
-    kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton("← Назад к истории", callback_data=f"open:{key}"))
+    if data:
+        if data.get("card_id"):
+            try:
+                bot.delete_message(chat_id, data["card_id"])
+            except Exception as e:
+                print(f"[close_card] {e}")
+        if data.get("main_id") and data.get("story_key"):
+            _show_main_keyboard(chat_id, data["main_id"], data["story_key"])
 
-    try:
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-    except Exception:
-        pass
-
-    if img_path:
-        with open(img_path, "rb") as f:
-            bot.send_photo(call.message.chat.id, f, caption=text,
-                           parse_mode="HTML", reply_markup=kb)
-    else:
-        bot.send_message(call.message.chat.id, text,
-                         parse_mode="HTML", reply_markup=kb)
-
+    bot.answer_callback_query(call.id)
+    
 if __name__ == "__main__":
     print(f"💘 Бот запущен. Историй: {len(STORIES)}")
     bot.polling(none_stop=True)
