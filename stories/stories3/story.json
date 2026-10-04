@@ -2,6 +2,7 @@
   "title": "🏮 Виола. Лондон → Пекин",
   "heroine": "Виола",
   "setting": "Лондон, Англия → Пекин, Китай",
+  "status": "in_development",
   "heroes": [
     {
       "id": "oliver",
