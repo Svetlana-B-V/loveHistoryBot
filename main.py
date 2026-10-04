@@ -9,6 +9,8 @@ bot = telebot.TeleBot(secrets['BOT_API_TOKEN'])
 
 STORIES_DIR = "stories"
 PROGRESS_FILE = "progress.json"
+# Единый разделитель в клавиатурах — визуальный отступ между группами кнопок
+DIVIDER = InlineKeyboardButton("─" * 20, callback_data="noop")
 
 USER_CARD = {}
 
@@ -179,16 +181,27 @@ def find_image(story, node_id, suffix=""):
 def main_keyboard(uid):
     kb = InlineKeyboardMarkup(row_width=1)
     u = get_user(uid)
+
+    # Кнопка «Продолжить» — только если есть незавершённая история
     if u.get("story") and u.get("node") and u.get("pov"):
         story = STORIES.get(u["story"])
-        if story:
+        if story and story.get("status") != "in_development":
             node = story["nodes"].get(u["node"], {})
             if node.get("choices"):
                 kb.add(InlineKeyboardButton(
                     f"▶ Продолжить: {story['title']}", callback_data="continue"
                 ))
+                kb.add(DIVIDER)
+
+    # Список историй — с пометкой 🚧 для тех, что в разработке
     for key, s in STORIES.items():
-        kb.add(InlineKeyboardButton(s["title"], callback_data=f"open:{key}"))
+        if s.get("status") == "hidden":
+            continue
+        title = s["title"]
+        if s.get("status") == "in_development":
+            title += " 🚧"
+        kb.add(InlineKeyboardButton(title, callback_data=f"open:{key}"))
+
     return kb
 
 
@@ -224,6 +237,40 @@ def open_story_keyboard(story_key):
         InlineKeyboardButton("← Назад", callback_data="menu")
     )
     return kb
+
+def show_development_screen(call, story_key):
+    """Заглушка для истории, которая ещё в разработке."""
+    story = STORIES[story_key]
+
+    text = (
+        f"🚧 <b>История в разработке</b>\n\n"
+        f"<b>{story['title']}</b>\n"
+        f"<i>{story['setting']}</i>\n\n"
+        f"Эта история ещё пишется — автор дорабатывает сюжет, "
+        f"финалы и иллюстрации. Совсем скоро она станет доступна.\n\n"
+        f"А пока — попробуй одну из готовых историй:"
+    )
+
+    kb = InlineKeyboardMarkup(row_width=1)
+    for k, s in STORIES.items():
+        # Не показываем текущую и вообще скрытые/недоступные
+        if k == story_key:
+            continue
+        if s.get("status") in ("in_development", "hidden"):
+            continue
+        kb.add(InlineKeyboardButton(s["title"], callback_data=f"open:{k}"))
+
+    kb.add(DIVIDER)
+    kb.add(InlineKeyboardButton("← В главное меню", callback_data="menu"))
+
+    # Удаляем старое сообщение, отправляем заглушку
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception:
+        pass
+
+    bot.send_message(call.message.chat.id, text,
+                     parse_mode="HTML", reply_markup=kb)
 
 
 # ═══════════════ ХЕНДЛЕРЫ ═══════════════
@@ -262,17 +309,37 @@ def cb_continue(call):
     if not (sk and nid and pov):
         cb_menu(call)
         return
+
+    story = STORIES.get(sk)
+    # 🚧 Если история ушла в разработку — не даём продолжить
+    if not story or story.get("status") == "in_development":
+        set_user(call.message.chat.id, story=None, node=None, pov=None)
+        cb_menu(call)
+        return
+
     try:
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except Exception:
         pass
     send_node(call.message.chat.id, sk, nid, pov)
 
+# Заглушка для кнопки-разделителя
+@bot.callback_query_handler(func=lambda c: c.data == "noop")
+def cb_noop(call):
+    bot.answer_callback_query(call.id)
+
+
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("open:"))
 def cb_open(call):
     key = call.data.split(":", 1)[1]
     story = STORIES[key]
+    
+    # 🚧 История в разработке — показываем заглушку вместо входа
+    if story.get("status") == "in_development":
+        show_development_screen(call, key)
+        return
+    
     try:
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except Exception:
