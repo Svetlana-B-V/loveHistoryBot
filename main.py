@@ -5,17 +5,111 @@ import telebot
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 from secrets import secrets
 
+# ═══════════════════════════════════════════════════════════
+#  ИНИЦИАЛИЗАЦИЯ
+# ═══════════════════════════════════════════════════════════
 bot = telebot.TeleBot(secrets['BOT_API_TOKEN'])
 
 STORIES_DIR = "stories"
 PROGRESS_FILE = "progress.json"
+
 # Единый разделитель в клавиатурах — визуальный отступ между группами кнопок
 DIVIDER = InlineKeyboardButton("─" * 20, callback_data="noop")
 
+# Состояние карточек персонажей для каждого чата:
+# {chat_id: {"card_id": ..., "main_id": ..., "story_key": ..., "current": ...}}
 USER_CARD = {}
+
+
+# ═══════════════ ЗАГРУЗКА ВСЕХ ИСТОРИЙ ═══════════════
+def load_all_stories():
+    """Читает все story.json из папки stories/."""
+    stories = {}
+    if not os.path.isdir(STORIES_DIR):
+        print(f"⚠ Папка {STORIES_DIR} не найдена")
+        return stories
+
+    for folder in sorted(os.listdir(STORIES_DIR)):
+        folder_path = os.path.join(STORIES_DIR, folder)
+        if not os.path.isdir(folder_path):
+            continue
+        story_path = os.path.join(folder_path, "story.json")
+        if not os.path.exists(story_path):
+            print(f"⚠ Нет story.json в {folder}")
+            continue
+        try:
+            with open(story_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            data["_folder"] = folder_path  # запомним путь для картинок
+            stories[folder] = data
+            print(f"✓ Загружена история: {data.get('title', folder)}")
+        except Exception as e:
+            print(f"✗ Ошибка в {folder}: {e}")
+    return stories
+
+
+STORIES = load_all_stories()
+
+
+# ═══════════════ ПРОГРЕСС ═══════════════
+def load_progress():
+    if os.path.exists(PROGRESS_FILE):
+        try:
+            with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_progress(data):
+    # Чистим пустые записи (только ключ без данных)
+    clean = {k: v for k, v in data.items() if v}
+    with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
+        json.dump(clean, f, ensure_ascii=False, indent=2)
+
+
+def get_user(uid):
+    return load_progress().get(str(uid), {})
+
+
+def set_user(uid, **kwargs):
+    data = load_progress()
+    u = data.get(str(uid), {})
+    u.update(kwargs)
+    data[str(uid)] = u
+    save_progress(data)
+
+
+def delete_user(uid):
+    """Удаляет все данные пользователя из progress.json."""
+    data = load_progress()
+    data.pop(str(uid), None)
+    save_progress(data)
+
+
+# ═══════════════ КАРТИНКИ ═══════════════
+def placeholder(text):
+    """Заглушка, если картинки нет."""
+    import urllib.parse
+    return f"https://placehold.co/1024x768/1a1133/ff4d94/png?text={urllib.parse.quote(text)}"
+
+
+def find_image(story, node_id, suffix=""):
+    """Ищет картинку {node_id}{suffix}.jpg / .png в папке img/."""
+    folder = os.path.join(story["_folder"], "img")
+    if not os.path.isdir(folder):
+        return None
+    for ext in (".jpg", ".jpeg", ".png", ".webp"):
+        path = os.path.join(folder, f"{node_id}{suffix}{ext}")
+        if os.path.exists(path):
+            return path
+    return None
+
 
 # ═══════════════ ТРЕКЕР ДЕТАЛЬНЫХ КАРТОЧЕК ПЕРСОНАЖЕЙ ═══════════════
 def _hide_main_keyboard(chat_id, main_id):
+    """Убирает кнопки с главного сообщения истории."""
     try:
         bot.edit_message_reply_markup(chat_id=chat_id, message_id=main_id, reply_markup=None)
     except Exception as e:
@@ -23,6 +117,7 @@ def _hide_main_keyboard(chat_id, main_id):
 
 
 def _show_main_keyboard(chat_id, main_id, story_key):
+    """Возвращает кнопки главному сообщению истории."""
     try:
         bot.edit_message_reply_markup(chat_id=chat_id, message_id=main_id,
                                       reply_markup=open_story_keyboard(story_key))
@@ -31,6 +126,7 @@ def _show_main_keyboard(chat_id, main_id, story_key):
 
 
 def _delete_prev_card(chat_id):
+    """Удаляет предыдущую карточку, если она была."""
     prev = USER_CARD.get(chat_id)
     if prev and prev.get("card_id"):
         try:
@@ -100,90 +196,15 @@ def _render_character_card(chat_id, story_key, character=None, is_heroine=False)
     }
     return sent.message_id
 
-# ═══════════════ ЗАГРУЗКА ВСЕХ ИСТОРИЙ ═══════════════
-def load_all_stories():
-    """Читает все story.json из папки истории/."""
-    stories = {}
-    if not os.path.isdir(STORIES_DIR):
-        print(f"⚠ Папка {STORIES_DIR} не найдена")
-        return stories
-
-    for folder in sorted(os.listdir(STORIES_DIR)):
-        folder_path = os.path.join(STORIES_DIR, folder)
-        if not os.path.isdir(folder_path):
-            continue
-        story_path = os.path.join(folder_path, "story.json")
-        if not os.path.exists(story_path):
-            print(f"⚠ Нет story.json в {folder}")
-            continue
-        try:
-            with open(story_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            data["_folder"] = folder_path  # запомним путь для картинок
-            stories[folder] = data
-            print(f"✓ Загружена история: {data.get('title', folder)}")
-        except Exception as e:
-            print(f"✗ Ошибка в {folder}: {e}")
-    return stories
-
-
-STORIES = load_all_stories()
-
-
-# ═══════════════ ПРОГРЕСС ═══════════════
-def load_progress():
-    if os.path.exists(PROGRESS_FILE):
-        try:
-            with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-
-def save_progress(data):
-    with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-def get_user(uid):
-    return load_progress().get(str(uid), {})
-
-
-def set_user(uid, **kwargs):
-    data = load_progress()
-    u = data.get(str(uid), {})
-    u.update(kwargs)
-    data[str(uid)] = u
-    save_progress(data)
-
-
-# ═══════════════ КАРТИНКИ ═══════════════
-def placeholder(text):
-    """Заглушка, если картинки нет."""
-    import urllib.parse
-    return f"https://placehold.co/1024x768/1a1133/ff4d94/png?text={urllib.parse.quote(text)}"
-
-
-def find_image(story, node_id, suffix=""):
-    """Ищет картинку {node_id}{suffix}.jpg / .png в папке img/."""
-    folder = os.path.join(story["_folder"], "img")
-    if not os.path.isdir(folder):
-        return None
-    for ext in (".jpg", ".jpeg", ".png", ".webp"):
-        path = os.path.join(folder, f"{node_id}{suffix}{ext}")
-        if os.path.exists(path):
-            return path
-    return None
-
 
 # ═══════════════ КЛАВИАТУРЫ ═══════════════
 def main_keyboard(uid):
     kb = InlineKeyboardMarkup(row_width=1)
     u = get_user(uid)
+    has_progress = bool(u.get("story") and u.get("node") and u.get("pov"))
 
     # Кнопка «Продолжить» — только если есть незавершённая история
-    if u.get("story") and u.get("node") and u.get("pov"):
+    if has_progress:
         story = STORIES.get(u["story"])
         if story and story.get("status") != "in_development":
             node = story["nodes"].get(u["node"], {})
@@ -201,6 +222,12 @@ def main_keyboard(uid):
         if s.get("status") == "in_development":
             title += " 🚧"
         kb.add(InlineKeyboardButton(title, callback_data=f"open:{key}"))
+
+    # Кнопка сброса — только если есть прогресс
+    if has_progress:
+        kb.add(DIVIDER)
+        kb.add(InlineKeyboardButton("🗑 Сбросить прогресс",
+                                    callback_data="reset_confirm"))
 
     return kb
 
@@ -227,10 +254,11 @@ def node_keyboard(story_key, node):
     kb.add(InlineKeyboardButton("🏠 Главное меню", callback_data="menu"))
     return kb
 
+
 def open_story_keyboard(story_key):
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(InlineKeyboardButton("👥 О героях", callback_data=f"about:{story_key}"))
-    kb.add(InlineKeyboardButton("─" * 20, callback_data="noop"))
+    kb.add(DIVIDER)
     kb.add(
         InlineKeyboardButton("💃 От первого лица", callback_data=f"pov:first:{story_key}"),
         InlineKeyboardButton("🎭 От третьего лица", callback_data=f"pov:third:{story_key}"),
@@ -238,6 +266,8 @@ def open_story_keyboard(story_key):
     )
     return kb
 
+
+# ═══════════════ ЭКРАНЫ ═══════════════
 def show_development_screen(call, story_key):
     """Заглушка для истории, которая ещё в разработке."""
     story = STORIES[story_key]
@@ -273,6 +303,40 @@ def show_development_screen(call, story_key):
                      parse_mode="HTML", reply_markup=kb)
 
 
+def show_reset_confirm(chat_id):
+    """Показывает экран подтверждения сброса прогресса."""
+    u = get_user(chat_id)
+    if not u.get("story"):
+        bot.send_message(
+            chat_id,
+            "🤷 У тебя пока нет сохранённого прогресса — сбрасывать нечего.",
+            reply_markup=main_keyboard(chat_id)
+        )
+        return
+
+    story = STORIES.get(u["story"], {})
+    story_title = story.get("title", "неизвестная история")
+
+    text = (
+        "⚠️ <b>Сброс прогресса</b>\n\n"
+        f"Ты сейчас проходишь: <b>{story_title}</b>\n"
+        f"Текущая сцена: <code>{u.get('node', '—')}</code>\n"
+        f"Режим: {'от первого лица 💃' if u.get('pov') == 'first' else 'от третьего лица 🎭'}\n\n"
+        "━━━━━━━━━━━━━━━\n"
+        "❗ <b>Внимание!</b>\n\n"
+        "Весь твой прогресс по всем историям будет <b>удалён навсегда</b>. "
+        "Ты начнёшь истории с самого начала.\n\n"
+        "Это действие <b>нельзя отменить</b>.\n"
+        "━━━━━━━━━━━━━━━"
+    )
+
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton("✅ Да, сбросить всё", callback_data="reset_do"))
+    kb.add(InlineKeyboardButton("← Отмена", callback_data="menu"))
+
+    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+
+
 # ═══════════════ ХЕНДЛЕРЫ ═══════════════
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
@@ -282,10 +346,17 @@ def cmd_start(message):
         "Здесь живут <b>три любовные истории</b> — с ветвлением, "
         "тремя мужчинами в каждой и <b>четырьмя финалами</b>:\n"
         "💖 Счастливая любовь · 💔 Треугольник · 🥀 Карьера · 🕊 Дружба\n\n"
-        "Каждый выбор меняет сюжет. Выбери историю:",
+        "Каждый выбор меняет сюжет. Выбери историю:\n\n"
+        "<i>💡 Команда /reset — сбросить прогресс по всем историям.</i>",
         parse_mode="HTML",
         reply_markup=main_keyboard(message.chat.id)
     )
+
+
+# Команда /reset — открывает экран подтверждения сброса
+@bot.message_handler(commands=['reset'])
+def cmd_reset(message):
+    show_reset_confirm(message.chat.id)
 
 
 @bot.callback_query_handler(func=lambda c: c.data == "menu")
@@ -323,23 +394,23 @@ def cb_continue(call):
         pass
     send_node(call.message.chat.id, sk, nid, pov)
 
-# Заглушка для кнопки-разделителя
+
+# Заглушка для кнопки-разделителя (одна, не дублировать!)
 @bot.callback_query_handler(func=lambda c: c.data == "noop")
 def cb_noop(call):
     bot.answer_callback_query(call.id)
-
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("open:"))
 def cb_open(call):
     key = call.data.split(":", 1)[1]
     story = STORIES[key]
-    
+
     # 🚧 История в разработке — показываем заглушку вместо входа
     if story.get("status") == "in_development":
         show_development_screen(call, key)
         return
-    
+
     try:
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except Exception:
@@ -363,7 +434,7 @@ def cb_open(call):
     else:
         bot.send_message(call.message.chat.id, text,
                          parse_mode="HTML", reply_markup=kb)
-        
+
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("pov:"))
 def cb_pov(call):
@@ -384,7 +455,6 @@ def cb_go(call):
     pov = u.get("pov", "third")
     prev_node_id = u.get("node")
     story = STORIES[key]
-    prev_node = story["nodes"].get(prev_node_id, {})
 
     try:
         bot.delete_message(call.message.chat.id, call.message.message_id)
@@ -431,30 +501,16 @@ def send_node(chat_id, story_key, node_id, pov):
             print(f"[photo] {e}")
 
     # fallback: заглушка
-    fallback = placeholder(node.get("scene_title", node_id))
+    fallback_img = placeholder(node.get("scene_title", node_id))
     try:
-        bot.send_photo(chat_id, fallback, caption=header + text,
+        bot.send_photo(chat_id, fallback_img, caption=header + text,
                        parse_mode="HTML", reply_markup=kb)
     except Exception:
         bot.send_message(chat_id, header + text,
                          parse_mode="HTML", reply_markup=kb)
 
 
-@bot.message_handler(func=lambda m: True)
-def fallback(message):
-    bot.send_message(
-        message.chat.id,
-        "Напиши /start, чтобы начать 💕",
-        reply_markup=main_keyboard(message.chat.id)
-    )
-
-# Игнорируем разделитель
-@bot.callback_query_handler(func=lambda c: c.data == "noop")
-def cb_noop(call):
-    bot.answer_callback_query(call.id)
-
-
-# Открытие «О героях» — с главного экрана
+# Открытие «О героях» — с главного экрана истории
 @bot.callback_query_handler(func=lambda c: c.data.startswith("about:"))
 def cb_about(call):
     story_key = call.data.split(":", 1)[1]
@@ -505,7 +561,7 @@ def cb_card_heroine(call):
     bot.answer_callback_query(call.id)
 
 
-# Нажатие «← Вернуться к истории» — просто удаляем карточку
+# Нажатие «← Вернуться к истории» — удаляем карточку, возвращаем кнопки
 @bot.callback_query_handler(func=lambda c: c.data == "close_card")
 def cb_close_card(call):
     chat_id = call.message.chat.id
@@ -521,7 +577,60 @@ def cb_close_card(call):
             _show_main_keyboard(chat_id, data["main_id"], data["story_key"])
 
     bot.answer_callback_query(call.id)
-    
+
+
+# ═══════════════ СБРОС ПРОГРЕССА ═══════════════
+@bot.callback_query_handler(func=lambda c: c.data == "reset_confirm")
+def cb_reset_confirm(call):
+    print(f"[reset] reset_confirm: chat_id={call.message.chat.id}")
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception as e:
+        print(f"[reset] delete failed: {e}")
+    show_reset_confirm(call.message.chat.id)
+    bot.answer_callback_query(call.id)
+
+
+@bot.callback_query_handler(func=lambda c: c.data == "reset_do")
+def cb_reset_do(call):
+    print(f"[reset] reset_do: chat_id={call.message.chat.id}")
+    chat_id = call.message.chat.id
+
+    # 1. Удаляем запись из progress.json
+    delete_user(chat_id)
+
+    # 2. Чистим состояние карточек персонажей
+    USER_CARD.pop(chat_id, None)
+
+    # 3. Удаляем сообщение с подтверждением
+    try:
+        bot.delete_message(chat_id, call.message.message_id)
+    except Exception as e:
+        print(f"[reset] delete failed: {e}")
+
+    # 4. Показываем меню
+    bot.send_message(
+        chat_id,
+        "🗑 <b>Прогресс сброшен</b>\n\n"
+        "Все сохранённые данные удалены. Можешь начать заново — "
+        "выбери любую историю 💘",
+        parse_mode="HTML",
+        reply_markup=main_keyboard(chat_id)
+    )
+    bot.answer_callback_query(call.id, "Прогресс сброшен")
+
+
+# ═══════════════ FALLBACK ═══════════════
+@bot.message_handler(func=lambda m: True)
+def fallback(message):
+    bot.send_message(
+        message.chat.id,
+        "Напиши /start, чтобы начать 💕",
+        reply_markup=main_keyboard(message.chat.id)
+    )
+
+
+# ═══════════════ ЗАПУСК ═══════════════
 if __name__ == "__main__":
     print(f"💘 Бот запущен. Историй: {len(STORIES)}")
     bot.polling(none_stop=True)
