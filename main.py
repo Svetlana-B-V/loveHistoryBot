@@ -631,6 +631,14 @@ def fallback(message):
 
 
 # ═══════════════ ЗАПУСК ═══════════════
+import time
+
 if __name__ == "__main__":
     print(f"💘 Бот запущен. Историй: {len(STORIES)}")
-    bot.polling(none_stop=True)
+    while True:
+        try:
+            bot.polling(none_stop=True, timeout=60, long_polling_timeout=60)
+        except Exception as e:
+            print(f"[polling] ошибка: {e}")
+            print("⏳ Перезапуск через 5 секунд...")
+            time.sleep(5)
