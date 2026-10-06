@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>💗 Love Stories</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Загрузчик -->
+    <div id="loader">
+        <div class="loader-heart">💗</div>
+        <div class="loader-text">Загружаем истории…</div>
+    </div>
+
+    <!-- ЭКРАН 1: Меню историй -->
+    <section id="screen-menu" class="screen hidden">
+        <header class="main-header">
+            <h1>Love Stories</h1>
+            <p class="subtitle">Три истории · Три мужчины · Четыре финала</p>
+        </header>
+        <div id="stories-list" class="stories-list"></div>
+    </section>
+
+    <!-- ЭКРАН 2: Выбор POV -->
+    <section id="screen-pov" class="screen hidden">
+        <header class="pov-header">
+            <h2 id="pov-title"></h2>
+            <p id="pov-setting" class="pov-setting"></p>
+        </header>
+        <p class="pov-question">💗 Как ты хочешь пройти эту историю?</p>
+        <div class="pov-buttons">
+            <button class="btn btn-primary" id="pov-first">
+                <span class="btn-emoji">🩷</span>
+                <span class="btn-label">От первого лица</span>
+                <span class="btn-hint">«Я захожу в бар…»</span>
+            </button>
+            <button class="btn btn-secondary" id="pov-third">
+                <span class="btn-emoji">🎀</span>
+                <span class="btn-label">От третьего лица</span>
+                <span class="btn-hint">«Анастасия заходит…»</span>
+            </button>
+        </div>
+        <button class="btn btn-ghost" id="pov-back">🌸 ← Назад</button>
+    </section>
+
+    <!-- ЭКРАН 3: История -->
+    <section id="screen-story" class="screen hidden">
+        <div class="story-image-wrap">
+            <img id="story-image" src="" alt="">
+            <div class="story-image-overlay"></div>
+        </div>
+        <div class="story-text-wrap">
+            <p id="story-text"></p>
+        </div>
+        <div id="choices" class="choices"></div>
+        <button class="btn btn-ghost btn-small" id="story-menu">🌸 К историям</button>
+    </section>
+
+    <script src="app.js"></script>
+</body>
+</html>

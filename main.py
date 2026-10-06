@@ -13,6 +13,10 @@ bot = telebot.TeleBot(secrets['BOT_API_TOKEN'])
 STORIES_DIR = "stories"
 PROGRESS_FILE = "progress.json"
 
+# Для Миниапп
+WEBAPP_URL = secrets.get('WEBAPP_URL', '').strip()
+DEV_MODE = not WEBAPP_URL  # True — Mini App отключён
+
 # Единый разделитель в клавиатурах — визуальный отступ между группами кнопок
 DIVIDER = InlineKeyboardButton("─" * 20, callback_data="noop")
 
@@ -232,6 +236,23 @@ def main_keyboard(uid):
     return kb
 
 
+def mode_keyboard():
+    """Экран выбора режима: чат или Mini App."""
+    kb = InlineKeyboardMarkup(row_width=1)
+
+    if not DEV_MODE:
+        kb.add(InlineKeyboardButton(
+            "✨ Открыть Mini App",
+            web_app=WebAppInfo(url=WEBAPP_URL)
+        ))
+
+    kb.add(InlineKeyboardButton(
+        "💬 Читать в чате", callback_data="mode_chat"
+    ))
+    return kb
+
+
+
 def pov_keyboard(story_key):
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(
@@ -249,10 +270,15 @@ def node_keyboard(story_key, node):
         for label, nxt in choices:
             kb.add(InlineKeyboardButton(label, callback_data=f"go:{story_key}:{nxt}"))
     else:
+        # Концовка
+        if not DEV_MODE:
+            kb.add(InlineKeyboardButton(
+                "✨ Продолжить в Mini App",
+                web_app=WebAppInfo(url=WEBAPP_URL)
+            ))
         kb.add(InlineKeyboardButton("📚 К списку историй", callback_data="menu"))
         kb.add(InlineKeyboardButton("🔄 Пройти заново", callback_data=f"open:{story_key}"))
-    kb.add(InlineKeyboardButton("🏠 Главное меню", callback_data="menu"))
-    return kb
+        return kb
 
 
 def open_story_keyboard(story_key):
@@ -340,17 +366,44 @@ def show_reset_confirm(chat_id):
 # ═══════════════ ХЕНДЛЕРЫ ═══════════════
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
-    bot.send_message(
-        message.chat.id,
+    text = (
         "✨ <b>Привет, красотка!</b>\n\n"
-        "Здесь живут <b>три любовные истории</b> — с ветвлением, "
+        "Здесь живут <b>три любовные истории</b> — с ветвлением,\n"
         "тремя мужчинами в каждой и <b>четырьмя финалами</b>:\n"
         "💖 Счастливая любовь · 💔 Треугольник · 🥀 Карьера · 🕊 Дружба\n\n"
-        "Каждый выбор меняет сюжет. Выбери историю:\n\n"
-        "<i>💡 Команда /reset — сбросить прогресс по всем историям.</i>",
-        parse_mode="HTML",
-        reply_markup=main_keyboard(message.chat.id)
     )
+
+    if DEV_MODE:
+        # Mini App отключён — сразу в чат
+        text += "💬 Выбери историю:"
+        bot.send_message(
+            message.chat.id, text,
+            parse_mode="HTML",
+            reply_markup=main_keyboard(message.chat.id)
+        )
+    else:
+        text += "💗 Как тебе удобнее читать?"
+        bot.send_message(
+            message.chat.id, text,
+            parse_mode="HTML",
+            reply_markup=mode_keyboard()
+        )
+
+# Обработчик выбора «Читать в чате»
+@bot.callback_query_handler(func=lambda c: c.data == "mode_chat")
+def cb_mode_chat(call):
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception:
+        pass
+    bot.send_message(
+        call.message.chat.id,
+        "💬 <b>Выбери свою историю:</b>\n\n"
+        "Если захочешь попробовать красивый Mini App — напиши /start заново.",
+        parse_mode="HTML",
+        reply_markup=main_keyboard(call.message.chat.id)
+    )
+    bot.answer_callback_query(call.id)
 
 
 # Команда /reset — открывает экран подтверждения сброса
@@ -365,12 +418,21 @@ def cb_menu(call):
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except Exception:
         pass
-    bot.send_message(
-        call.message.chat.id,
-        "💖 <b>Выбери свою историю:</b>",
-        parse_mode="HTML",
-        reply_markup=main_keyboard(call.message.chat.id)
-    )
+
+    if DEV_MODE:
+        bot.send_message(
+            call.message.chat.id,
+            "💖 <b>Выбери свою историю:</b>",
+            parse_mode="HTML",
+            reply_markup=main_keyboard(call.message.chat.id)
+        )
+    else:
+        bot.send_message(
+            call.message.chat.id,
+            "✨ <b>Куда идём?</b>",
+            parse_mode="HTML",
+            reply_markup=mode_keyboard()
+        )
 
 
 @bot.callback_query_handler(func=lambda c: c.data == "continue")
